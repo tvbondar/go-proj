@@ -6,22 +6,21 @@ import (
 )
 
 func reverseString(s string) string {
-	phrase := strings.Split(s, " ")
-	reversedPhrase := make([]string, len(phrase))
-	for i := range phrase {
-		reversedPhrase[len(phrase)-1-i] = phrase[i]
+	phrase := strings.Fields(s)
+	for i := 0; i < len(phrase)/2; i++ {
+		j := len(phrase) - 1 - i
+		phrase[i], phrase[j] = phrase[j], phrase[i]
 	}
-	return strings.Join(reversedPhrase, " ")
-
+	return strings.Join(phrase, " ")
 }
 
 func main() {
-	var String string
-	_, err := fmt.Scanln(&String)
-	if err != nil {
-		fmt.Println("Ошибка ввода:", err)
-		return
-	}
+	String := "snow dog sun"
+	fmt.Println(String)
 	fmt.Println(reverseString(String))
+
+	String2 := "new long short string bool"
+	fmt.Println(String2)
+	fmt.Println(reverseString(String2))
 
 }
