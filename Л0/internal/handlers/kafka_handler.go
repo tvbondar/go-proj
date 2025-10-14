@@ -1,3 +1,4 @@
+// Логика обработки сообщений из Kafka
 package handlers
 
 import (

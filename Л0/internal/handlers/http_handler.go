@@ -1,3 +1,4 @@
+// HTTP-эндпоинты
 package handlers
 
 import (

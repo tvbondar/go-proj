@@ -1,3 +1,4 @@
+# Оркестрация (Go, Kafka, PostgreSQL)
 services:
   postgres:
     image: postgres:latest

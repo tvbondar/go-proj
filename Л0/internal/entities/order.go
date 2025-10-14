@@ -1,3 +1,4 @@
+// Структура Order, Delivery, Payment, Items
 package entities
 
 import "time"

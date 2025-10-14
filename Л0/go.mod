@@ -1,3 +1,4 @@
+// Зависимости проекта
 module github.com/tvbondar/go-server
 
 go 1.22.12
