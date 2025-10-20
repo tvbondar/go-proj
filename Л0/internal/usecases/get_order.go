@@ -1,7 +1,11 @@
 // Логика получения заказа (из кэша/БД)
+// log.Printf для ошибок
 package usecases
 
 import (
+	"context"
+	"log"
+
 	"github.com/tvbondar/go-server/internal/entities"
 	"github.com/tvbondar/go-server/internal/repositories"
 )
@@ -15,15 +19,20 @@ func NewGetOrderUseCase(cacheRepo, dbRepo repositories.OrderRepository) *GetOrde
 	return &GetOrderUseCase{cacheRepo: cacheRepo, dbRepo: dbRepo}
 }
 
-func (u *GetOrderUseCase) Execute(id string) (entities.Order, error) {
-	order, err := u.cacheRepo.GetOrderByID(id)
+func (u *GetOrderUseCase) Execute(ctx context.Context, id string) (entities.Order, error) {
+	order, err := u.cacheRepo.GetOrderByID(ctx, id)
 	if err == nil {
 		return order, nil
 	}
-	order, err = u.dbRepo.GetOrderByID(id)
+	log.Printf("Cache miss for order %s: %v", id, err) // Логируем miss для мониторинга
+
+	order, err = u.dbRepo.GetOrderByID(ctx, id)
 	if err != nil {
+		log.Printf("DB error for order %s: %v", id, err)
 		return entities.Order{}, err
 	}
-	u.cacheRepo.SaveOrder(order)
+	if err := u.cacheRepo.SaveOrder(ctx, order); err != nil {
+		log.Printf("Failed to cache order %s: %v", id, err) // Не фатально, но логируем
+	}
 	return order, nil
 }

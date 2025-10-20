@@ -1,10 +1,15 @@
 // Работа с PostgreSQL
+//GetAllOrders теперь один запрос с JOIN — быстрее для загрузки кэша. Обработка rows в цикле собирает заказы с items.
+// Использовал sql.Null* для null-значений (если нет items). Это оптимизирует восстановление кэша при старте
+
 package repositories
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/tvbondar/go-server/internal/entities"
 )
@@ -17,7 +22,7 @@ func NewPostgresOrderRepository(db *sql.DB) *PostgresOrderRepository {
 	return &PostgresOrderRepository{db: db}
 }
 
-func (r *PostgresOrderRepository) SaveOrder(order entities.Order) error {
+func (r *PostgresOrderRepository) SaveOrder(ctx context.Context, order entities.Order) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -57,7 +62,7 @@ func (r *PostgresOrderRepository) SaveOrder(order entities.Order) error {
 	return tx.Commit()
 }
 
-func (r *PostgresOrderRepository) GetOrderByID(id string) (entities.Order, error) {
+func (r *PostgresOrderRepository) GetOrderByID(ctx context.Context, id string) (entities.Order, error) {
 	var order entities.Order
 	var deliveryJSON, paymentJSON []byte
 
@@ -98,24 +103,63 @@ func (r *PostgresOrderRepository) GetOrderByID(id string) (entities.Order, error
 	return order, nil
 }
 
-func (r *PostgresOrderRepository) GetAllOrders() ([]entities.Order, error) {
+func (r *PostgresOrderRepository) GetAllOrders(ctx context.Context) ([]entities.Order, error) {
 	var orders []entities.Order
-	rows, err := r.db.Query("SELECT order_uid FROM orders")
+
+	// Оптимизированный запрос: все orders + items в одном проходе
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT o.order_uid, o.track_number, o.entry, o.locale, o.internal_signature, o.customer_id, 
+		       o.delivery_service, o.shardkey, o.sm_id, o.date_created, o.oof_shard, o.delivery, o.payment,
+		       i.chrt_id, i.track_number, i.price, i.rid, i.name, i.sale, i.size, i.total_price, i.nm_id, i.brand, i.status
+		FROM orders o
+		LEFT JOIN items i ON o.order_uid = i.order_uid
+		ORDER BY o.order_uid`)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query orders: %w", err)
+		return nil, fmt.Errorf("failed to query all orders: %w", err)
 	}
 	defer rows.Close()
 
+	currentUID := ""
+	var currentOrder entities.Order
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			continue
-		}
-		order, err := r.GetOrderByID(id)
+		var order entities.Order
+		var deliveryJSON, paymentJSON []byte
+		var item entities.Item
+		var itemChrtID sql.NullInt64
+
+		err := rows.Scan(&order.OrderUID, &order.TrackNumber, &order.Entry, &order.Locale, &order.InternalSignature,
+			&order.CustomerID, &order.DeliveryService, &order.ShardKey, &order.SmID, &order.DateCreated, &order.OofShard,
+			&deliveryJSON, &paymentJSON,
+			&itemChrtID, &item.TrackNumber, &item.Price, &item.Rid, &item.Name, &item.Sale, &item.Size, &item.TotalPrice, &item.NmID, &item.Brand, &item.Status)
 		if err != nil {
+			log.Printf("Scan error in GetAllOrders: %v", err)
 			continue
 		}
-		orders = append(orders, order)
+
+		if order.OrderUID != currentUID {
+			if currentUID != "" {
+				orders = append(orders, currentOrder)
+			}
+			currentUID = order.OrderUID
+			currentOrder = order
+			if err := json.Unmarshal(deliveryJSON, &currentOrder.Delivery); err != nil {
+				log.Printf("Unmarshal delivery error: %v", err)
+				continue
+			}
+			if err := json.Unmarshal(paymentJSON, &currentOrder.Payment); err != nil {
+				log.Printf("Unmarshal payment error: %v", err)
+				continue
+			}
+			currentOrder.Items = []entities.Item{}
+		}
+		if itemChrtID.Valid {
+			item.ChrtID = int(itemChrtID.Int64)
+			currentOrder.Items = append(currentOrder.Items, item)
+		}
 	}
+	if currentUID != "" {
+		orders = append(orders, currentOrder)
+	}
+
 	return orders, nil
 }
