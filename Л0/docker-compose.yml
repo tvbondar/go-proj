@@ -1,7 +1,7 @@
-# Оркестрация (Go, Kafka, PostgreSQL)
+version: '3.8'
 services:
   postgres:
-    image: postgres:latest
+    image: postgres:15
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: pass
@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./migrations:/migrations
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -39,15 +39,11 @@ services:
       - "29092:29092"
 
   app:
-    image: go-server-app
     build:
       context: .
       dockerfile: Dockerfile
     depends_on:
-      postgres:
-        condition: service_healthy
-      kafka:
-        condition: service_started
+      - postgres
+      - kafka
     ports:
       - "8081:8081"
-      

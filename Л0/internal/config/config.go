@@ -4,6 +4,8 @@
 package config
 
 import (
+	"errors"
+
 	"github.com/spf13/viper"
 )
 
@@ -18,21 +20,30 @@ func LoadConfig() (*Config, error) {
 	viper.SetConfigType("yaml")   // Тип файла
 	viper.AddConfigPath(".")      // Путь к файлу (в корне проекта)
 
-	// Установка значений по умолчанию
-	viper.SetDefault("db_dsn", "user=postgres password=pass dbname=orders_db host=postgres port=5432 sslmode=disable")
-	viper.SetDefault("kafka_addr", "kafka:9092")
-	viper.SetDefault("http_port", ":8081")
+	// Поддержка переменных окружения
+	viper.AutomaticEnv()
 
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, err // Ошибка парсинга файла
-		}
-		// Если файла нет, используем значения по умолчанию
-	}
+	// Установка значений по умолчанию (без секретов!)
+	viper.SetDefault("kafka_addr", "localhost:9092")
+	viper.SetDefault("http_port", ":8081")
+	// По безопасности: не ставим пароль/DSN по-умолчанию. Требуем явно задать DB_DSN или config.yaml.
+	// viper.SetDefault("db_dsn", "")
+
+	_ = viper.ReadInConfig() // если файла нет — используем env/дефолты
 
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, err
+	}
+
+	// Проверка обязательных значений
+	if cfg.DBDSN == "" {
+		// Попробуем получить из окружения DB_DSN
+		if viper.GetString("DB_DSN") != "" {
+			cfg.DBDSN = viper.GetString("DB_DSN")
+		} else {
+			return nil, errors.New("db_dsn is not set; set DB_DSN env or config.yaml")
+		}
 	}
 	return &cfg, nil
 }

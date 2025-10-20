@@ -1,7 +1,6 @@
 // Логика обработки сообщений из Kafka
-// Вынес конфиг в LoadConfig. Добавил ctx для shutdown. Заменил fmt на log.
-// Конфиг из config.go — гибко. Ctx для shutdown (вызови go handlers.StartKafkaConsumer(ctx, ...) в main.go).
-// При ошибке обработки не коммитим — retry от Kafka. Это предотвращает потерю данных.
+// Принимаем cfg извне, возвращаем ошибку в случае фатального сбоя.
+// Ctx используется для graceful shutdown.
 package handlers
 
 import (
@@ -14,11 +13,7 @@ import (
 	"github.com/tvbondar/go-server/internal/usecases"
 )
 
-func StartKafkaConsumer(ctx context.Context, usecase *usecases.ProcessOrderUseCase) {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Fatal("Failed to load config for Kafka:", err)
-	}
+func StartKafkaConsumer(ctx context.Context, cfg *config.Config, usecase *usecases.ProcessOrderUseCase) error {
 
 	readerCfg := kafka.ReaderConfig{
 		Brokers:  []string{cfg.KafkaAddr},
@@ -30,39 +25,52 @@ func StartKafkaConsumer(ctx context.Context, usecase *usecases.ProcessOrderUseCa
 
 	var reader *kafka.Reader
 
+	// Попытки подключения к брокеру
 	for i := 0; i < 10; i++ {
-		reader = kafka.NewReader(readerCfg)
-		var conn *kafka.Conn
-		conn, err = kafka.Dial("tcp", cfg.KafkaAddr)
+		// Проверяем доступность брокера через Dial
+		conn, err := kafka.Dial("tcp", cfg.KafkaAddr)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
+			// создаём reader только если брокер доступен
+			reader = kafka.NewReader(readerCfg)
 			break
 		}
 		log.Printf("Failed to connect to Kafka (attempt %d): %v", i+1, err)
-		time.Sleep(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
 	}
-	if err != nil {
-		log.Printf("Failed to connect to Kafka after retries: %v", err)
-		return
+	if reader == nil {
+		return nil // не фатально: если Kafka недоступен, возвращаем и позволяем main продолжить работу
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			log.Printf("Error closing kafka reader: %v", err)
+		}
+	}()
 	log.Println("Successfully connected to Kafka topic 'orders'")
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Kafka consumer shutting down")
-			return
+			return nil
 		default:
 			msg, err := reader.FetchMessage(ctx)
 			if err != nil {
+				// Если ctx отменён, выйдем; иначе залогируем и продолжим
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				log.Printf("Error fetching message: %v", err)
 				continue
 			}
 			log.Printf("Received message with key: %s", string(msg.Key))
 			if err := usecase.Execute(ctx, msg.Value); err != nil {
 				log.Printf("Error processing message: %v", err)
-				// Можно не коммитить при ошибке, чтобы retry
+				// Не коммитим при ошибке — позволяем retry
 				continue
 			}
 			if err := reader.CommitMessages(ctx, msg); err != nil {

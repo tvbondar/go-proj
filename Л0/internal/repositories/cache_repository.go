@@ -1,12 +1,13 @@
 // Интерфейс и реализация In-memory Cache
-// Заменил map на LRU-cache с лимитом (например, 1000 элементов) — старые вытесняются. Сохранил интерфейс
-// LRU автоматически удаляет старые записи при переполнении (инвалидация). Это предотвращает утечки памяти
+// Заменил map на LRU-cache с лимитом и добавил синхронизацию.
+// Конструктор возвращает ошибку вместо log.Fatal чтобы не завершать процесс в библиотеке.
 package repositories
 
 import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/tvbondar/go-server/internal/entities"
@@ -14,23 +15,28 @@ import (
 
 type CacheOrderRepository struct {
 	cache *lru.Cache[string, entities.Order]
+	mu    sync.RWMutex
 }
 
-func NewCacheOrderRepository() *CacheOrderRepository {
+func NewCacheOrderRepository() (*CacheOrderRepository, error) {
 	cache, err := lru.New[string, entities.Order](1000)
 	if err != nil {
-		log.Fatal("Failed to create LRU cache:", err)
+		return nil, err
 	}
-	return &CacheOrderRepository{cache: cache}
+	return &CacheOrderRepository{cache: cache}, nil
 }
 
 func (r *CacheOrderRepository) SaveOrder(ctx context.Context, order entities.Order) error {
+	r.mu.Lock()
 	r.cache.Add(order.OrderUID, order)
+	r.mu.Unlock()
 	return nil
 }
 
 func (r *CacheOrderRepository) GetOrderByID(ctx context.Context, id string) (entities.Order, error) {
+	r.mu.RLock()
 	order, ok := r.cache.Get(id)
+	r.mu.RUnlock()
 	if !ok {
 		return entities.Order{}, fmt.Errorf("order not found")
 	}
@@ -39,22 +45,38 @@ func (r *CacheOrderRepository) GetOrderByID(ctx context.Context, id string) (ent
 
 func (r *CacheOrderRepository) GetAllOrders(ctx context.Context) ([]entities.Order, error) {
 	var orders []entities.Order
+	r.mu.RLock()
 	keys := r.cache.Keys()
+	r.mu.RUnlock()
 	for _, key := range keys {
-		order, _ := r.cache.Get(key)
+		r.mu.RLock()
+		order, ok := r.cache.Get(key)
+		r.mu.RUnlock()
+		if !ok {
+			continue
+		}
 		orders = append(orders, order)
 	}
 	return orders, nil
 }
 
-func (r *CacheOrderRepository) LoadFromDB(dbRepo OrderRepository) error {
-	orders, err := dbRepo.GetAllOrders(context.Background()) // Передаем контекст
+// LoadFromDB загружает часть данных в кэш. При большом количестве заказов стоит
+// загружать порциями или не грузить всё сразу. Используем передаваемый контекст.
+func (r *CacheOrderRepository) LoadFromDB(ctx context.Context, dbRepo OrderRepository) error {
+	orders, err := dbRepo.GetAllOrders(ctx)
 	if err != nil {
 		return err
 	}
 	for _, order := range orders {
-		r.cache.Add(order.OrderUID, order)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			r.mu.Lock()
+			r.cache.Add(order.OrderUID, order)
+			r.mu.Unlock()
+		}
 	}
-	fmt.Println("Cache loaded with", len(orders), "orders")
+	log.Println("Cache loaded with", len(orders), "orders")
 	return nil
 }

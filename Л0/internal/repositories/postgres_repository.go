@@ -1,7 +1,5 @@
 // Работа с PostgreSQL
-//GetAllOrders теперь один запрос с JOIN — быстрее для загрузки кэша. Обработка rows в цикле собирает заказы с items.
-// Использовал sql.Null* для null-значений (если нет items). Это оптимизирует восстановление кэша при старте
-
+// Перевёл операции на использование контекста (BeginTx, ExecContext, QueryRowContext)
 package repositories
 
 import (
@@ -23,11 +21,13 @@ func NewPostgresOrderRepository(db *sql.DB) *PostgresOrderRepository {
 }
 
 func (r *PostgresOrderRepository) SaveOrder(ctx context.Context, order entities.Order) error {
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	deliveryJSON, err := json.Marshal(order.Delivery)
 	if err != nil {
@@ -38,7 +38,7 @@ func (r *PostgresOrderRepository) SaveOrder(ctx context.Context, order entities.
 		return fmt.Errorf("failed to marshal payment: %w", err)
 	}
 
-	_, err = tx.Exec(`
+	_, err = tx.ExecContext(ctx, `
         INSERT INTO orders (order_uid, track_number, entry, locale, internal_signature, customer_id, delivery_service, shardkey, sm_id, date_created, oof_shard, delivery, payment)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		order.OrderUID, order.TrackNumber, order.Entry, order.Locale, order.InternalSignature,
@@ -49,7 +49,7 @@ func (r *PostgresOrderRepository) SaveOrder(ctx context.Context, order entities.
 	}
 
 	for _, item := range order.Items {
-		_, err = tx.Exec(`
+		_, err = tx.ExecContext(ctx, `
             INSERT INTO items (order_uid, chrt_id, track_number, price, rid, name, sale, size, total_price, nm_id, brand, status)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 			order.OrderUID, item.ChrtID, item.TrackNumber, item.Price, item.Rid, item.Name,
@@ -59,20 +59,26 @@ func (r *PostgresOrderRepository) SaveOrder(ctx context.Context, order entities.
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit tx for order %s: %w", order.OrderUID, err)
+	}
+	return nil
 }
 
 func (r *PostgresOrderRepository) GetOrderByID(ctx context.Context, id string) (entities.Order, error) {
 	var order entities.Order
 	var deliveryJSON, paymentJSON []byte
 
-	err := r.db.QueryRow(`
+	err := r.db.QueryRowContext(ctx, `
         SELECT order_uid, track_number, entry, locale, internal_signature, customer_id, delivery_service, shardkey, sm_id, date_created, oof_shard, delivery, payment
         FROM orders WHERE order_uid = $1`,
 		id).Scan(&order.OrderUID, &order.TrackNumber, &order.Entry, &order.Locale, &order.InternalSignature,
 		&order.CustomerID, &order.DeliveryService, &order.ShardKey, &order.SmID, &order.DateCreated, &order.OofShard,
 		&deliveryJSON, &paymentJSON)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return entities.Order{}, fmt.Errorf("order not found")
+		}
 		return entities.Order{}, fmt.Errorf("failed to query order %s: %w", id, err)
 	}
 
@@ -83,7 +89,7 @@ func (r *PostgresOrderRepository) GetOrderByID(ctx context.Context, id string) (
 		return entities.Order{}, fmt.Errorf("failed to unmarshal payment: %w", err)
 	}
 
-	rows, err := r.db.Query(`
+	rows, err := r.db.QueryContext(ctx, `
         SELECT chrt_id, track_number, price, rid, name, sale, size, total_price, nm_id, brand, status
         FROM items WHERE order_uid = $1`, id)
 	if err != nil {

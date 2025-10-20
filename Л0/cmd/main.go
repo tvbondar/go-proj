@@ -1,4 +1,5 @@
 // Главная точка запуска (инициализация, сервер, consumer)
+// Главная точка запуска (инициализация, сервер, consumer)
 package main
 
 import (
@@ -6,8 +7,8 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
-	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -57,10 +58,16 @@ func main() {
 	log.Println("Successfully connected to database and applied migrations")
 
 	dbRepo := repositories.NewPostgresOrderRepository(db)
-	cacheRepo := repositories.NewCacheOrderRepository()
 
-	if err := cacheRepo.LoadFromDB(dbRepo); err != nil {
-		log.Fatal("Failed to load cache from DB:", err)
+	// Конструктор кеша теперь может вернуть ошибку
+	cacheRepo, err := repositories.NewCacheOrderRepository()
+	if err != nil {
+		log.Fatal("Failed to create cache repository:", err)
+	}
+
+	// Загружаем кеш (не блокирующую операцию можно вынести в фон)
+	if err := cacheRepo.LoadFromDB(context.Background(), dbRepo); err != nil {
+		log.Printf("Failed to load cache from DB (non-fatal): %v", err)
 	}
 
 	processUseCase := usecases.NewProcessOrderUseCase(dbRepo, cacheRepo)
@@ -70,8 +77,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Запуск Kafka Consumer в горутине с контекстом
-	go handlers.StartKafkaConsumer(ctx, processUseCase)
+	// Ждём завершения горутин
+	var wg sync.WaitGroup
+
+	// Запуск Kafka Consumer в горутине с контекстом; передаём cfg, чтобы consumer не читал конфиг сам
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := handlers.StartKafkaConsumer(ctx, cfg, processUseCase); err != nil {
+			log.Printf("Kafka consumer stopped with error: %v", err)
+		} else {
+			log.Println("Kafka consumer stopped")
+		}
+	}()
 
 	httpHandler := handlers.NewHTTPHandler(getUseCase)
 	mux := http.NewServeMux()
@@ -101,7 +119,10 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
-	// Закрытие БД
+
+	// дождёмся завершения фоновых ворутин (например, Kafka consumer)
+	wg.Wait()
+
+	// все defer (включая db.Close()) выполнятся, выходим нормально
 	log.Println("Graceful shutdown completed, exiting...")
-	os.Exit(0)
 }
