@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tvbondar/go-proj/Л2/л2.9/pkg/unpacker"
+	"github.com/tvbondar/go-proj/L2/l2.9/pkg/unpacker"
 )
 
 func main() {
