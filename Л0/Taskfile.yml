@@ -1,0 +1,73 @@
+version: '3'
+
+vars:
+  DOCKERFILE: "Л0/Dockerfile"
+  COMPOSE_FILE: "Л0/docker-compose.yml"
+  IMAGE_NAME: "go-server-app"
+
+tasks:
+  default:
+    desc: "Run tests and linters"
+    cmds:
+      - task: mod-tidy
+      - task: generate-mocks
+      - task: vet
+      - task: lint
+      - task: test
+
+  mod-tidy:
+    desc: "go mod tidy"
+    cmds:
+      - go mod tidy
+
+  fmt:
+    desc: "Format code"
+    cmds:
+      - go fmt ./...
+
+  generate-mocks:
+    desc: "Generate gomock mocks via go generate (or mockgen)"
+    cmds:
+      - go generate ./...
+    env:
+      GOFLAGS: ""
+
+  vet:
+    desc: "Run go vet"
+    cmds:
+      - go vet ./...
+
+  lint:
+    desc: "Run golangci-lint (must be installed)"
+    cmds:
+      - golangci-lint run ./...
+
+  test:
+    desc: "Run unit tests with race detector"
+    cmds:
+      - go test ./... -v -race
+
+  build-binary:
+    desc: "Build linux binary (for docker final image)"
+    cmds:
+      - CGO_ENABLED=0 GOOS=linux go build -a -o server ./cmd
+
+  build-docker:
+    desc: "Build Docker image using project Dockerfile"
+    cmds:
+      - docker build -t {{.IMAGE_NAME}} -f {{.DOCKERFILE}} .
+
+  compose-up:
+    desc: "Run docker-compose (build services)"
+    cmds:
+      - docker-compose -f {{.COMPOSE_FILE}} up --build
+
+  compose-down:
+    desc: "Stop compose"
+    cmds:
+      - docker-compose -f {{.COMPOSE_FILE}} down
+
+  clean:
+    desc: "Clean local artifacts"
+    cmds:
+      - rm -f server || true
