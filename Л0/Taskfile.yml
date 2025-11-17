@@ -1,8 +1,9 @@
 version: '3'
 
 vars:
-  DOCKERFILE: "Л0/Dockerfile"
-  COMPOSE_FILE: "Л0/docker-compose.yml"
+  DOCKERFILE: "Dockerfile"
+  BUILD_CONTEXT: "."
+  COMPOSE_FILE: "docker-compose.yml"
   IMAGE_NAME: "go-server-app"
 
 tasks:
@@ -55,7 +56,7 @@ tasks:
   build-docker:
     desc: "Build Docker image using project Dockerfile"
     cmds:
-      - docker build -t {{.IMAGE_NAME}} -f {{.DOCKERFILE}} .
+      - docker build -t {{.IMAGE_NAME}} -f {{.DOCKERFILE}} {{.BUILD_CONTEXT}}
 
   compose-up:
     desc: "Run docker-compose (build services)"

@@ -95,7 +95,11 @@ func (r *PostgresOrderRepository) GetOrderByID(ctx context.Context, id string) (
 	if err != nil {
 		return entities.Order{}, fmt.Errorf("failed to query items for order %s: %w", id, err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("rows close error: %v", err)
+		}
+	}()
 	for rows.Next() {
 		var item entities.Item
 		err := rows.Scan(&item.ChrtID, &item.TrackNumber, &item.Price, &item.Rid, &item.Name,
@@ -123,7 +127,11 @@ func (r *PostgresOrderRepository) GetAllOrders(ctx context.Context) ([]entities.
 	if err != nil {
 		return nil, fmt.Errorf("failed to query all orders: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("rows close error: %v", err)
+		}
+	}()
 
 	currentUID := ""
 	var currentOrder entities.Order

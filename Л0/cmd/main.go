@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -20,41 +21,75 @@ import (
 	"github.com/tvbondar/go-server/internal/usecases"
 )
 
+func ensureAddr(port string) string {
+	if port == "" {
+		return ":8081"
+	}
+	if strings.HasPrefix(port, ":") {
+		return port
+	}
+	return ":" + port
+}
+
 func main() {
 	// Загрузка конфигурации
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatal("Failed to load config:", err)
+		log.Fatalf("Failed to load config: %v", err)
 	}
 
 	var db *sql.DB
+	var lastErr error
+	connected := false
+
 	// Попытка подключения к БД с миграциями
 	for i := 0; i < 10; i++ {
 		db, err = sql.Open("postgres", cfg.DBDSN)
 		if err != nil {
+			lastErr = err
 			log.Printf("Failed to open database connection (attempt %d): %v", i+1, err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
-		// Применение миграций перед ping
-		if err := goose.Up(db, "migrations"); err != nil {
-			log.Printf("Failed to apply migrations (attempt %d): %v", i+1, err)
-			db.Close()
+
+		// Убедимся, что база отвечает
+		if err = db.Ping(); err != nil {
+			lastErr = err
+			log.Printf("Failed to ping database (attempt %d): %v", i+1, err)
+			if cerr := db.Close(); cerr != nil {
+				log.Printf("failed to close db: %v", cerr)
+			}
 			time.Sleep(2 * time.Second)
 			continue
 		}
-		err = db.Ping()
-		if err == nil {
-			break
+
+		// Применение миграций после успешного ping
+		if err := goose.Up(db, "migrations"); err != nil {
+			lastErr = err
+			log.Printf("Failed to apply migrations (attempt %d): %v", i+1, err)
+			if cerr := db.Close(); cerr != nil {
+				log.Printf("failed to close db: %v", cerr)
+			}
+			time.Sleep(2 * time.Second)
+			continue
 		}
-		log.Printf("Failed to ping database (attempt %d): %v", i+1, err)
-		db.Close()
-		time.Sleep(2 * time.Second)
+
+		// Всё успешно
+		connected = true
+		break
 	}
-	if err != nil {
-		log.Fatal("Failed to connect to database after retries:", err)
+
+	if !connected {
+		log.Fatalf("Failed to connect to database after retries: %v", lastErr)
 	}
-	defer db.Close()
+
+	// Закрываем DB только при завершении приложения
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("failed to close db: %v", err)
+		}
+	}()
+
 	log.Println("Successfully connected to database and applied migrations")
 
 	dbRepo := repositories.NewPostgresOrderRepository(db)
@@ -62,7 +97,7 @@ func main() {
 	// Конструктор кеша теперь может вернуть ошибку
 	cacheRepo, err := repositories.NewCacheOrderRepository()
 	if err != nil {
-		log.Fatal("Failed to create cache repository:", err)
+		log.Fatalf("Failed to create cache repository: %v", err)
 	}
 
 	// Загружаем кеш (не блокирующую операцию можно вынести в фон)
@@ -97,13 +132,17 @@ func main() {
 	mux.Handle("/", http.FileServer(http.Dir("web")))
 
 	server := &http.Server{
-		Addr:    cfg.HTTPPort,
+		Addr:    ensureAddr(cfg.HTTPPort),
 		Handler: mux,
+		// можно добавить таймауты при необходимости
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	// Запуск HTTP-сервера в горутине
 	go func() {
-		log.Printf("HTTP server starting on %s", cfg.HTTPPort)
+		log.Printf("HTTP server starting on %s", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("HTTP server error: %v", err)
 		}
