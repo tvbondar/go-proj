@@ -28,7 +28,7 @@ Web Client
 
 ---
 
-### Как запустить (30 секунд до рабочего сервиса)
+### Как запустить
 
 ```bash
 git clone https://github.com/tvbondar/go-proj/L0.git
