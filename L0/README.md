@@ -1,31 +1,29 @@
 # Wildberries L0 – Демонстрационный сервис с Kafka, PostgreSQL, кешем
 
 
-## Архитектура системы
+### Архитектура системы
 
-```mermaid
-flowchart TD
-    A[Web Client<br/>(HTML + JS)] 
-    -->|HTTP GET /order/:id| B(Go Service<br/>http://localhost:8081)
-
-    B --> C{Kafka Message<br/>Received?}
-    C -->|Yes| D[Kafka Consumer<br/>(goroutine)]
-    D -->|Parse JSON| E[Validate & Save]
-    E --> F[(PostgreSQL)]
-    E --> G[In-memory Cache<br/>(sync.Map / LRU)]
-
-    B --> H{Cache Hit?}
-    H -->|Yes| I[Return from Cache<br/>⚡ Instant]
-    H -->|No| J[Load from PostgreSQL]
-    J --> G
-    J --> I
-
-    K[Kafka Broker<br/>(orders topic)] --> D
-
-    style B fill:#4CAF50,stroke:#333,color:white
-    style G fill:#2196F3,stroke:#333,color:white
-    style F fill:#FF9800,stroke:#333,color:white
-    style I fill:#8BC34A,stroke:#333,color:white
+Web Client
+│ HTTP
+▼
+┌───────────────────────────────┐
+│       Docker Compose           │
+│                                │
+│  ┌─────────┐   JSON   ┌───────────┐
+│  │  Kafka  │◄─────────│ Consumer  │
+│  └─────────┘          └───────────┘
+│         │                    ▲
+│         ▼                    │
+│  ┌─────────────────┐   ┌────────────┐
+│  │   Go Application │   │  Service   │
+│  │                 │   └────────────┘
+│  │  HTTP (net/http)│         │
+│  │  Mux            │         ▼
+│  └─────────────────┘   ┌────────────┐
+│          │              │ Repository │───► In-memory LRU Cache
+│          ▼              └────────────┘
+│     PostgreSQL                     ▲
+└────────────────────────────────────┘
 
 
 ---
