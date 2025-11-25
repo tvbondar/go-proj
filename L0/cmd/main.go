@@ -1,5 +1,4 @@
 // Главная точка запуска (инициализация, сервер, consumer)
-// Главная точка запуска (инициализация, сервер, consumer)
 package main
 
 import (
@@ -100,7 +99,7 @@ func main() {
 		log.Fatalf("Failed to create cache repository: %v", err)
 	}
 
-	// Загружаем кеш (не блокирующую операцию можно вынести в фон)
+	// Загружаем кеш
 	if err := cacheRepo.LoadFromDB(context.Background(), dbRepo); err != nil {
 		log.Printf("Failed to load cache from DB (non-fatal): %v", err)
 	}
@@ -108,14 +107,12 @@ func main() {
 	processUseCase := usecases.NewProcessOrderUseCase(dbRepo, cacheRepo)
 	getUseCase := usecases.NewGetOrderUseCase(cacheRepo, dbRepo)
 
-	// Создание контекста для graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Ждём завершения горутин
 	var wg sync.WaitGroup
 
-	// Запуск Kafka Consumer в горутине с контекстом; передаём cfg, чтобы consumer не читал конфиг сам
+	// Запуск Kafka Consumer в горутине с контекстом
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -132,15 +129,14 @@ func main() {
 	mux.Handle("/", http.FileServer(http.Dir("web")))
 
 	server := &http.Server{
-		Addr:    ensureAddr(cfg.HTTPPort),
-		Handler: mux,
-		// можно добавить таймауты при необходимости
+		Addr:         ensureAddr(cfg.HTTPPort),
+		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Запуск HTTP-сервера в горутине
+	// Запуск HTTP-сервера
 	go func() {
 		log.Printf("HTTP server starting on %s", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -152,16 +148,12 @@ func main() {
 	<-ctx.Done()
 	log.Println("Shutdown signal received, starting graceful shutdown...")
 
-	// Остановка сервера с таймаутом
+	// Остановка сервера
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
-
-	// дождёмся завершения фоновых ворутин (например, Kafka consumer)
 	wg.Wait()
-
-	// все defer (включая db.Close()) выполнятся, выходим нормально
 	log.Println("Graceful shutdown completed, exiting...")
 }

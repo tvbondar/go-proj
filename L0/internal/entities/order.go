@@ -1,7 +1,4 @@
 // Структура Order, Delivery, Payment, Items
-// Добавил validate-теги на ключевые поля (ориентируясь на model.json).
-// Теги как required, gt=0 позволяют validator автоматически проверять.
-// Добавь больше по model.json (например, для email). Это упрощает валидацию в process_order.go.
 package entities
 
 import "time"

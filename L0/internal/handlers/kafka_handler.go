@@ -1,6 +1,4 @@
 // Логика обработки сообщений из Kafka
-// Принимаем cfg извне, возвращаем ошибку в случае фатального сбоя.
-// Ctx используется для graceful shutdown.
 package handlers
 
 import (
@@ -27,7 +25,7 @@ func StartKafkaConsumer(ctx context.Context, cfg *config.Config, usecase *usecas
 
 	// Попытки подключения к брокеру
 	for i := 0; i < 10; i++ {
-		// Проверяем доступность брокера через Dial
+		// Проверяем доступность брокера
 		conn, err := kafka.Dial("tcp", cfg.KafkaAddr)
 		if err == nil {
 			_ = conn.Close()
@@ -43,7 +41,7 @@ func StartKafkaConsumer(ctx context.Context, cfg *config.Config, usecase *usecas
 		}
 	}
 	if reader == nil {
-		return nil // не фатально: если Kafka недоступен, возвращаем и позволяем main продолжить работу
+		return nil
 	}
 	defer func() {
 		if err := reader.Close(); err != nil {
@@ -60,7 +58,6 @@ func StartKafkaConsumer(ctx context.Context, cfg *config.Config, usecase *usecas
 		default:
 			msg, err := reader.FetchMessage(ctx)
 			if err != nil {
-				// Если ctx отменён, выйдем; иначе залогируем и продолжим
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
@@ -70,7 +67,6 @@ func StartKafkaConsumer(ctx context.Context, cfg *config.Config, usecase *usecas
 			log.Printf("Received message with key: %s", string(msg.Key))
 			if err := usecase.Execute(ctx, msg.Value); err != nil {
 				log.Printf("Error processing message: %v", err)
-				// Не коммитим при ошибке — позволяем retry
 				continue
 			}
 			if err := reader.CommitMessages(ctx, msg); err != nil {

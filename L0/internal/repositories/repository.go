@@ -1,6 +1,4 @@
 // Интерфейс Repository (общий для кэша и БД)
-// Context позволяет отменять операции (например, при shutdown).
-// Пока не меняй реализации — добавь ctx позже, когда реализуешь shutdown в main.go.
 package repositories
 
 //go:generate mockgen -destination=mocks/mock_order_repository.go -package=mocks github.com/tvbondar/go-server/internal/repositories OrderRepository

@@ -17,7 +17,6 @@ func TestProcessOrderUseCase_SaveSuccess(t *testing.T) {
 	mockDB := mockrepos.NewMockOrderRepository(ctrl)
 	mockCache := mockrepos.NewMockOrderRepository(ctrl)
 
-	// Подготовим корректный JSON (полный)
 	raw := []byte(`{
 		"order_uid":"o1",
 		"track_number":"t1",
@@ -68,7 +67,6 @@ func TestProcessOrderUseCase_SaveSuccess(t *testing.T) {
 		"oof_shard":"1"
 	}`)
 
-	// ожидания: DB.SaveOrder вызовется, затем Cache.SaveOrder вызовется
 	mockDB.EXPECT().SaveOrder(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	mockCache.EXPECT().SaveOrder(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 

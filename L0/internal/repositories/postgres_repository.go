@@ -1,5 +1,4 @@
 // Работа с PostgreSQL
-// Перевёл операции на использование контекста (BeginTx, ExecContext, QueryRowContext)
 package repositories
 
 import (

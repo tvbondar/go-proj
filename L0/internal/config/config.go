@@ -1,6 +1,5 @@
 // Загрузка настроек (из env или YAML)
 // Этот файл вынесет конфигурации (DSN для PostgreSQL, Kafka адреса, HTTP порт)
-// из main.go в отдельный модуль с использованием библиотеки viper
 package config
 
 import (
@@ -19,29 +18,25 @@ type Config struct {
 func LoadConfig() (*Config, error) {
 	viper.SetConfigName("config") // Имя файла конфига (config.yaml)
 	viper.SetConfigType("yaml")   // Тип файла
-	viper.AddConfigPath(".")      // Путь к файлу (в корне проекта)
+	viper.AddConfigPath(".")      // Путь к файлу
 
 	// Поддержка переменных окружения
 	viper.AutomaticEnv()
 
-	// Установка значений по умолчанию (без секретов!)
+	// Установка значений по умолчанию
 	if err := viper.BindEnv("kafka_addr", "KAFKA_BROKERS"); err != nil {
 		return nil, fmt.Errorf("failed to bind KAFKA_BROKERS env: %w", err)
 	}
 	viper.SetDefault("http_port", ":8081")
-	// По безопасности: не ставим пароль/DSN по-умолчанию. Требуем явно задать DB_DSN или config.yaml.
-	// viper.SetDefault("db_dsn", "")
 
-	_ = viper.ReadInConfig() // если файла нет — используем env/дефолты
+	_ = viper.ReadInConfig()
 
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, err
 	}
 
-	// Проверка обязательных значений
 	if cfg.DBDSN == "" {
-		// Попробуем получить из окружения DB_DSN
 		if viper.GetString("DB_DSN") != "" {
 			cfg.DBDSN = viper.GetString("DB_DSN")
 		} else {

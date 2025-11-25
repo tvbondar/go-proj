@@ -1,6 +1,4 @@
 // Интерфейс и реализация In-memory Cache
-// Заменил map на LRU-cache с лимитом и добавил синхронизацию.
-// Конструктор возвращает ошибку вместо log.Fatal чтобы не завершать процесс в библиотеке.
 package repositories
 
 import (
@@ -60,8 +58,7 @@ func (r *CacheOrderRepository) GetAllOrders(ctx context.Context) ([]entities.Ord
 	return orders, nil
 }
 
-// LoadFromDB загружает часть данных в кэш. При большом количестве заказов стоит
-// загружать порциями или не грузить всё сразу. Используем передаваемый контекст.
+// LoadFromDB загружает часть данных в кэш
 func (r *CacheOrderRepository) LoadFromDB(ctx context.Context, dbRepo OrderRepository) error {
 	orders, err := dbRepo.GetAllOrders(ctx)
 	if err != nil {
