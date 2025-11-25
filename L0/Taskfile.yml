@@ -1,0 +1,104 @@
+version: '3'
+
+vars:
+  DOCKERFILE: "Dockerfile"
+  BUILD_CONTEXT: "."
+  COMPOSE_FILE: "docker-compose.yml"
+  IMAGE_NAME: "go-server-app"
+  APP_SERVICE: "wb-l0-app"
+
+tasks:
+  default:
+    desc: "Run tests and linters"
+    cmds:
+      - task: mod-tidy
+      - task: generate-mocks
+      - task: vet
+      - task: lint
+      - task: test
+
+  mod-tidy:
+    desc: "go mod tidy"
+    cmds:
+      - go mod tidy
+
+  fmt:
+    desc: "Format code"
+    cmds:
+      - go fmt ./...
+
+  generate-mocks:
+    desc: "Generate gomock mocks via go generate (or mockgen)"
+    cmds:
+      - go generate ./...
+    env:
+      GOFLAGS: ""
+
+  vet:
+    desc: "Run go vet"
+    cmds:
+      - go vet ./...
+
+  lint:
+    desc: "Run golangci-lint (must be installed)"
+    cmds:
+      - golangci-lint run ./...
+
+  test:
+    desc: "Run tests with no -race"
+    cmds:
+      - go test ./... -v -cover
+
+  test-race:
+    desc: "Race tests (gcc needed)"
+    cmds:
+      - CGO_ENABLED=1 go test ./... -v -race -cover
+
+  build-binary:
+    desc: "Build linux binary (for docker final image)"
+    cmds:
+      - CGO_ENABLED=0 GOOS=linux go build -a -o server ./cmd
+
+  build-docker:
+    desc: "Build Docker image using project Dockerfile"
+    cmds:
+      - docker build -t {{.IMAGE_NAME}} -f {{.DOCKERFILE}} {{.BUILD_CONTEXT}}
+
+  compose-up:
+    desc: "Run docker-compose (build services)"
+    cmds:
+      - docker-compose -f {{.COMPOSE_FILE}} up --build
+
+  compose-down:
+    desc: "Stop compose"
+    cmds:
+      - docker-compose -f {{.COMPOSE_FILE}} down
+
+  clean:
+    desc: "Clean local artifacts"
+    cmds:
+      - rm -f server || true
+
+  restart-app:
+    desc: "Restart app"
+    cmds:
+      - docker compose restart app
+      - echo "→ http://localhost:8081"
+
+  restart-all:
+    desc: "Restart everything"
+    cmds:
+      - docker compose restart   
+
+  db-clean:
+    desc: "Clean database"
+    cmds:
+      - docker compose exec postgres psql -U postgres -d orders_db -c "TRUNCATE orders CASCADE;"
+      - echo "База очищена!"
+
+  publish-order:
+    desc: "Send order"
+    cmds:
+      - docker compose cp model.json kafka:/tmp/order.json
+      - docker compose exec kafka sh -c "cat /tmp/order.json | kafka-console-producer --topic orders --bootstrap-server kafka:9092"
+      - echo "Заказ отправлен! Через 3 сек будет на http://localhost:8081" 
