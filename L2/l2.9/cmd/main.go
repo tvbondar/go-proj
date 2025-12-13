@@ -9,7 +9,7 @@ import (
 
 func main() {
 	var packedString string
-	fmt.Println("Введите строку для распаковки: \n")
+	fmt.Println("Введите строку для распаковки:")
 	_, err := fmt.Scanf("%s", &packedString)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Ошибка при чтении ввода: ", err)

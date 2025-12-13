@@ -6,7 +6,7 @@ import (
 )
 
 // создаем rконстанту, содержащую ошибку
-var ErrInvalidString = errors.New("Invalid string")
+var ErrInvalidString = errors.New("invalid string")
 
 // создаем основную функцию Unpack
 // она осуществляет распаковку строки последующим правилам:

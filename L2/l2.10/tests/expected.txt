@@ -1,0 +1,6 @@
+Sidorov   Kazan               January     95    2K      jan
+Petrov    Saint-Petersburg    December    92    500M    dec
+Smirnov   Ekaterinburg        January     92    1M      Jan
+Ivanov    Moscow              March       85    10G     mar   
+Kozlov    Novosibirsk         April       85    100     apr
+Popov     Omsk                February    78    5G      feb
